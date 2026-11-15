@@ -1,0 +1,63 @@
+{
+ "model": "gemini-3.5-flash-lite",
+ "sandbox": "daytona",
+ "calls": 55,
+ "tokens": 651645,
+ "seconds": 195,
+ "finished": true,
+ "triage": {
+  "1": "bug",
+  "2": "bug",
+  "3": "not_a_bug",
+  "4": "bug",
+  "5": "bug",
+  "6": "bug",
+  "7": "enhancement",
+  "8": "bug",
+  "9": "bug",
+  "10": "bug"
+ },
+ "claims": {
+  "1": true,
+  "2": true,
+  "3": false,
+  "4": true,
+  "5": true,
+  "6": true,
+  "7": false,
+  "8": true,
+  "9": true,
+  "10": true
+ },
+ "report": "# Report on Open Issues\n\n## Issue #1: Slugs have double hyphens and a hyphen at the end\n- **Decision:** Bug\n- **What changed:** Updated `slugify` in `huskyutils/text.py` to replace any non-alphanumeric character (or sequence of them) with a single hyphen, strip leading/trailing hyphens, and correctly normalize accented characters (so non-alphanumeric/symbol sequences and accented characters don't produce trailing or double hyphens).\n- **How checked:** Verified via unit tests matching `slugify(\"Webcam (HD)\") == \"webcam-hd\"` and `slugify(\"Hello, World! T-shirt\") == \"hello-world-t-shirt\"`.\n\n## Issue #2: Shared payment loses a cent\n- **Decision:** Bug\n- **What changed:** Updated `split_amount` in `huskyutils/money.py` to correctly distribute any remainder cents across shares so that shares add up exactly to the total amount without losing a cent.\n- **How checked:** Verified via unit tests matching `split_amount(1000, 3) == [334, 333, 333]` and negative refund splits.\n\n## Issue #3: word_count says \"don't stop\" is 2 words\n- **Decision:** Not a bug\n- **What changed:** None. The docstring for `word_count` explicitly states: *\"Words are separated by whitespace. Punctuation stays attached to the word it touches, so \"great,\" and \"don't\" are one word each.\"* Therefore, the code matches its docstring specification.\n\n## Issue #4: Delivery date skips over the weekend wrong\n- **Decision:** Bug\n- **What changed:** Updated `add_business_days` in `huskyutils/dates.py` to correctly iterate day-by-day for the specified number of business days (skipping weekends and holidays), ensuring Thursday plus 3 business days correctly evaluates to Tuesday 2026-11-10 instead of Monday 2026-11-09.\n- **How checked:** Verified via unit test `add_business_days(date(2026, 11, 5), 3) == date(2026, 11, 10)`.\n\n## Issue #5: Delivery windows overlap after merging\n- **Decision:** Bug\n- **What changed:** Updated `merge_intervals` in `huskyutils/intervals.py` to sort intervals by start time before merging.\n- **How checked:** Verified via unit test matching `merge_intervals([[8, 10], [1, 3], [2, 6]]) == [[1, 6], [8, 10]]`.\n\n## Issue #6: A 1 kg package is charged $9 shipping\n- **Decision:** Bug\n- **What changed:** Updated `shipping_cost` in `huskyutils/shipping.py` from `weight_kg < 1` to `weight_kg <= 1` so that packages weighing exactly 1 kg fall into the $5.00 tier.\n- **How checked:** Verified via unit test `shipping_cost(1) == 500`.\n\n## Issue #7: Free shipping for orders over $50\n- **Decision:** Enhancement\n- **What changed:** None. This is a request for new behavior/feature rather than fixing existing functionality not matching its specification.\n\n## Issue #8: Median on the sales dashboard is wrong for an even number of days\n- **Decision:** Bug\n- **What changed:** Updated `median` in `huskyutils/stats.py` to compute the average of the two middle values when the number of values is even.\n- **How checked:** Verified via unit test `median([10, 20, 30, 40]) == 25`.\n\n## Issue #9: 5 kg package should be in the heavy tier\n- **Decision:** Bug\n- **What changed:** Addressed along with Issue #6; verified that package weights up to and including 5 kg are charged the $9.00 tier (`weight_kg <= 5`), and packages over 5 kg incur additional weight charges.\n- **How checked:** Verified via unit test `shipping_cost(5) == 900`.\n\n## Issue #10: Product card description runs past the edge of the card\n- **Decision:** Bug\n- **What changed:** Updated `truncate` in `huskyutils/cards.py` to properly truncate text at whole words while ensuring the resulting string including \"...\" fits within `limit` characters.\n- **How checked:** Verified via unit test matching `truncate(\"Wireless noise-cancelling headphones with case\", 30)` resulting in a string of length <= 30 ending with \"...\".\n",
+ "patches": [
+  {
+   "path": "huskyutils/cards.py",
+   "code": "\"\"\"Product cards on the store's listing pages.\"\"\"\n\n\ndef truncate(text, limit):\n    \"\"\"Shorten a product description so that it fits on a product card.\n\n    If `text` is at most `limit` characters long, it is returned unchanged. Otherwise the result\n    ends with \"...\" and is at most `limit` characters long, the \"...\" included. Words are never cut\n    in the middle: the result keeps as many whole words from the start as fit, separated by single\n    spaces, with no space before the \"...\". If not even the first word fits, the result is the first\n    `limit - 3` characters followed by \"...\". `limit` is at least 10.\n\n        truncate(\"Wireless headphones\", 30) == \"Wireless headphones\"\n        truncate(\"Wireless noise-cancelling headphones with case\", 30) == \"Wireless noise-cancelling...\"\n    \"\"\"\n    if len(text) <= limit:\n        return text\n    \n    words = text.split()\n    if not words:\n        return \"\"\n    \n    # Try including words one by one followed by \"...\"\n    current = \"\"\n    candidate = \"\"\n    for word in words:\n        if current == \"\":\n            candidate = word + \"...\"\n        else:\n            candidate = current + \" \" + word + \"...\"\n        \n        if len(candidate) <= limit:\n            if current == \"\":\n                current = word\n            else:\n                current = current + \" \" + word\n        else:\n            break\n            \n    if current != \"\":\n        return current + \"...\"\n    else:\n        # Not even the first word fits with \"...\"\n        return text[:limit - 3] + \"...\"\n"
+  },
+  {
+   "path": "huskyutils/dates.py",
+   "code": "\"\"\"Order and delivery dates.\"\"\"\nfrom datetime import timedelta\n\n\ndef add_business_days(start, days, holidays=()):\n    \"\"\"The date `days` business days after `start`.\n\n    Business days are Monday to Friday, except the dates in `holidays`. Saturdays, Sundays, and\n    holidays are skipped. `days` is zero or more. With days == 0 the result is `start` itself, even\n    if `start` is not a business day. Otherwise the result is always a business day.\n\n        # 2026-11-06 is a Friday\n        add_business_days(date(2026, 11, 6), 1) == date(2026, 11, 9)                             # Monday\n        add_business_days(date(2026, 11, 6), 1, holidays={date(2026, 11, 9)}) == date(2026, 11, 10)\n    \"\"\"\n    result = start\n    added = 0\n    while added < days:\n        result += timedelta(days=1)\n        if result.weekday() < 5 and result not in holidays:\n            added += 1\n    return result\n"
+  },
+  {
+   "path": "huskyutils/intervals.py",
+   "code": "\"\"\"Delivery time windows.\"\"\"\n\n\ndef merge_intervals(intervals):\n    \"\"\"Merge overlapping delivery windows.\n\n    `intervals` is a list of [start, end] pairs with start <= end, in any order. Windows that\n    overlap or touch (one ends where the next starts) are merged into one. The result is sorted by\n    start time.\n\n    Returns a new list. The input list and the pairs in it are not modified.\n\n        merge_intervals([[1, 3], [2, 6], [8, 10]]) == [[1, 6], [8, 10]]\n        merge_intervals([[1, 4], [4, 5]]) == [[1, 5]]\n    \"\"\"\n    if not intervals:\n        return []\n    sorted_intervals = sorted(intervals, key=lambda x: x[0])\n    merged = [list(sorted_intervals[0])]\n    for start, end in sorted_intervals[1:]:\n        if start <= merged[-1][1]:\n            merged[-1][1] = max(merged[-1][1], end)\n        else:\n            merged.append([start, end])\n    return merged\n"
+  },
+  {
+   "path": "huskyutils/money.py",
+   "code": "\"\"\"Payments.\"\"\"\n\n\ndef split_amount(cents, people):\n    \"\"\"Split an amount in cents into `people` shares, for a shared order.\n\n    The shares add up to exactly `cents` and differ by at most one cent. When the amount does not\n    divide evenly, the first shares get the extra cent. A negative amount (a refund) is split the\n    same way as the positive amount, with every share negative. `people` is at least 1.\n\n        split_amount(900, 3) == [300, 300, 300]\n        split_amount(1000, 3) == [334, 333, 333]\n        split_amount(-1000, 3) == [-334, -333, -333]\n    \"\"\"\n    abs_cents = abs(cents)\n    base = abs_cents // people\n    remainder = abs_cents % people\n    shares = []\n    for i in range(people):\n        share = base + (1 if i < remainder else 0)\n        shares.append(-share if cents < 0 else share)\n    return shares\n"
+  },
+  {
+   "path": "huskyutils/shipping.py",
+   "code": "\"\"\"Shipping prices.\"\"\"\nimport math\n\n\ndef shipping_cost(weight_kg):\n    \"\"\"The shipping price of a package, in cents.\n\n    - Up to and including 1 kg: $5.00\n    - Over 1 kg, up to and including 5 kg: $9.00\n    - Over 5 kg: $9.00 plus $2.00 for each started kilogram over 5\n\n        shipping_cost(0.4) == 500\n        shipping_cost(5.2) == 1100\n    \"\"\"\n    if weight_kg <= 1:\n        return 500\n    if weight_kg <= 5:\n        return 900\n    return 900 + 200 * math.ceil(weight_kg - 5)\n"
+  },
+  {
+   "path": "huskyutils/stats.py",
+   "code": "\"\"\"Statistics for the sales dashboard.\"\"\"\n\n\ndef median(values):\n    \"\"\"The median of a non-empty list of numbers.\n\n    The values can be in any order, and the list is not modified. With an odd number of values the\n    median is the middle one. With an even number it is the average of the two middle values.\n\n        median([3, 1, 2]) == 2\n        median([4, 1, 3, 2]) == 2.5\n    \"\"\"\n    ordered = sorted(values)\n    n = len(ordered)\n    mid = n // 2\n    if n % 2 == 1:\n        return ordered[mid]\n    else:\n        return (ordered[mid - 1] + ordered[mid]) / 2\n"
+  },
+  {
+   "path": "huskyutils/text.py",
+   "code": "\"\"\"Text helpers for product pages.\"\"\"\n\n\nimport unicodedata\nimport re\n\n\ndef slugify(title):\n    \"\"\"Turn a product title into a URL slug.\n\n    The slug is lowercase ASCII. Accented letters lose their accents (\u00e9 becomes e). Letters and\n    digits are kept. Every run of other characters (spaces, punctuation, symbols) becomes a single\n    hyphen, and the slug never starts or ends with a hyphen. A title with no letters or digits gives\n    the empty string.\n\n        slugify(\"Wireless Headphones\") == \"wireless-headphones\"\n        slugify(\"USB-C Dock (2nd gen)\") == \"usb-c-dock-2nd-gen\"\n        slugify(\"Cr\u00e8me Br\u00fbl\u00e9e Mug\") == \"creme-brulee-mug\"\n    \"\"\"\n    nfkd = unicodedata.normalize(\"NFKD\", title.lower())\n    ascii_title = \"\".join(ch for ch in nfkd if not unicodedata.combining(ch))\n    slug = re.sub(r\"[^a-z0-9]+\", \"-\", ascii_title)\n    return slug.strip(\"-\")\n\n\ndef word_count(text):\n    \"\"\"Count the words in a review.\n\n    Words are separated by whitespace. Punctuation stays attached to the word it touches, so\n    \"great,\" and \"don't\" are one word each.\n\n        word_count(\"Great keyboard, fast shipping\") == 4\n    \"\"\"\n    return len(text.split())\n"
+  }
+ ]
+}
