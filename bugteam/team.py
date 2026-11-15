@@ -63,14 +63,33 @@ def triage(state: TeamState) -> dict:
     """Label every issue, one structured-output call per issue."""
     # TODO 2.1
     # your code here
-    raise NotImplementedError
+    model=config.chat().with_structured_output(Label)
+    files=repo_files()
+    code="\n\n".join(
+        f"# <{path}>\n{content}"
+        for path,content in files.items()
+        if path.startswith("huskyutils/")
+        )
+    labels={}
+    reasons={}
+    for issue in state["issues"]:
+        out=retry(model.invoke, TRIAGE_PROMPT.format(code=code, issue=issue_text(issue)))
+        labels[issue["number"]]=out.label
+        reasons[issue["number"]]=out.reasoning
+    return {"labels":labels, "reasons":reasons}
 
 
 def fan_out(state: TeamState):
     """One Send per issue triage labeled a bug, or straight to the report if there are none."""
     # TODO 2.2
     # your code here
-    raise NotImplementedError
+    bugs=[
+        issue for issue in state["issues"]
+        if state["labels"][issue["number"]]=="bug"
+    ]
+    if not bugs:
+        return "report"
+    return [Send("fix",{"issue": issue, "note": state["reasons"][issue["number"]]}) for issue in bugs]
 
 
 def fix(job: dict) -> dict:
@@ -106,7 +125,10 @@ def summary(state: TeamState) -> str:
     """The paragraph at the top of the report, written by the model from the facts only."""
     # TODO 2.3
     # your code here
-    raise NotImplementedError
+    all_facts=facts(state)
+    summary_="\n".join(fact for fact in all_facts)
+    out=retry(config.chat().invoke, REPORT_PROMPT.format(facts=summary_))
+    return text_of(out).strip()
 
 
 def report(state: TeamState) -> dict:
@@ -139,7 +161,15 @@ def report(state: TeamState) -> dict:
 def build_graph():
     # TODO 2.4
     # your code here
-    raise NotImplementedError
+    graph=StateGraph(TeamState)
+    graph.add_node("triage",triage)
+    graph.add_node("fix",fix)
+    graph.add_node("report",report)
+    graph.add_edge(START,"triage")
+    graph.add_conditional_edges("triage",fan_out,["fix","report"])
+    graph.add_edge("fix","report")
+    graph.add_edge("report",END)
+    return graph.compile()
 
 
 def run(issues, callbacks=None):
